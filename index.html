@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        .line,
+        .metricLines {
+            fill: none;
+            stroke-width: 2px;
+        }
+
+        .axis text {
+            font: 10px sans-serif;
+        }
+
+        .axis path,
+        .axis line {
+            fill: none;
+            stroke: #000;
+            shape-rendering: crispEdges;
+        }
+
+        .axis .domain {
+            display: none;
+        }
+
+        .genreLine .line {
+            opacity: 0.75;
+        }
+
+        .line-hover {
+            stroke-width: 3px;
+            cursor: pointer;
+        }
+
+        #dropdown {
+            font-family: 'Arial', sans-serif;
+            margin-bottom: 10px;
+        }
+
+        #dropdown select {
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+            margin-left: 5px;
+            cursor: pointer;
+            outline: none;
+        }
+
+        #dropdown select:focus {
+            border-color: #66afe9;
+            box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075), 0 0 8px rgba(102, 175, 233, 0.6);
+        }
+
+        #chart {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .chart-card {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin: 20px;
+            overflow: hidden;
+            /* Ensures the shadow and border-radius are contained */
+        }
+
+        .card-header {
+            padding: 10px 15px;
+            background-color: #f8f8f8;
+            border-bottom: 1px solid #ddd;
+            font-family: 'Arial', sans-serif;
+            font-size: 18px;
+        }
+
+        .card-body {
+            padding: 15px;
+        }
+
+        #chart {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .selected {
+            opacity: 1;
+            stroke-width: 3px;
+        }
+
+        .unselected {
+            opacity: 0.1;
+            stroke-width: 1px;
+        }
+
+        .legend-item.selected rect {
+            stroke: black;
+            stroke-width: 1px;
+        }
+
+        .legend-item.unselected rect {
+            stroke: none;
+            stroke-width: 0;
+        }
+    </style>
+    <meta charset="utf-8">
+    <title></title>
+</head>
+
+<body>
+    <div class="chart-card">
+        <div class="card-header">
+            <div id="dropdown">Select Metric:
+                <select id="metric-select">
+                    <option value="valence">Valence</option>
+                    <option value="acousticness">Acousticness</option>
+                    <option value="danceability">Danceability</option>
+                    <option value="energy">Energy</option>
+                    <option value="instrumentalness">Instrumentalness</option>
+                    <option value="liveness">Liveness</option>
+                    <option value="speechiness">Speechiness</option>
+                    <option value="tempo">Tempo</option>
+                </select>
+            </div>
+            <button id="reset">Reset</button>
+        </div>
+        <div class="card-body">
+            <div id="chart"></div>
+        </div>
+    </div>
+
+    <div id="tooltip"
+        style="position: absolute; opacity: 0; pointer-events: none; background-color: white; padding: 5px; border-radius: 3px; border: 1px solid #ddd;">
+    </div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+
+    <script>
+        Promise.all([d3.csv('https://raw.githubusercontent.com/jesperhemmingsson/Spotify-EDA/master/data/data.csv'),
+        d3.csv('https://raw.githubusercontent.com/jesperhemmingsson/Spotify-EDA/master/data/data_w_genres.csv')]).then(function (values) {
+
+            // Storing data from csv into files
+            var data = values[0];
+            var genres = values[1];
+
+            // Normalize artist names and create a mapping from artist to genres
+            var artistToGenre = {};
+            genres.forEach(function (g) {
+                var artistName = g.artists.toLowerCase().replace(/[^a-z0-9]/gi, '');
+                artistToGenre[artistName] = g.genres;
+            });
+
+            // Function to safely parse the artists' names
+            function parseArtists(artistsString) {
+                try {
+                    return JSON.parse(artistsString.replace(/'/g, '"'));
+                } catch (e) {
+                    return []; // Return an empty array if parsing fails
+                }
+            }
+
+            // Add genre to each row in data
+            data.forEach(function (d) {
+                var artistNames = parseArtists(d.artists.toLowerCase());
+                for (var i = 0; i < artistNames.length; i++) {
+                    var normalizedName = artistNames[i].replace(/[^a-z0-9]/gi, '');
+                    if (artistToGenre[normalizedName]) {
+                        d.genre = artistToGenre[normalizedName];
+                        break; // Assuming one genre per track is sufficient
+                    }
+                }
+                if (!d.genre) {
+                    d.genre = 'Unknown'; // Set a default genre if not found
+                }
+            });
+            data = data.filter(d => d.genre != '[]' && d.genre != 'Unknown')
+
+            function unpackGenres(data) {
+                const unpackedData = [];
+
+                data.forEach(item => {
+                    try {
+                        // Ensure that the genre field is a valid JSON string before parsing
+                        const genreString = item.genre.startsWith('[') ? item.genre : '["' + item.genre + '"]';
+                        const genres = JSON.parse(genreString.replace(/'/g, '"'));
+
+                        // Create a new item for each genre
+                        genres.forEach(genre => {
+                            const newItem = { ...item, genre: genre.trim() }; // Trim any whitespace from the genre
+                            unpackedData.push(newItem);
+                        });
+                    } catch (error) { }
+                });
+
+                return unpackedData;
+            }
+            var unpackedData;
+
+            try {
+                unpackedData = unpackGenres(data);
+            } catch (error) { }
+
+            // Helper function to calculate the average of an array of numbers
+            const average = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+
+            // Group by 'year' and 'genre', then calculate the average for each group
+            function groupAndAverage(data) {
+                const groupedData = d3.groups(
+                    data,
+                    d => +d.year,
+                    d => d.genre
+                );
+
+                const averagedData = groupedData.map(([year, genres]) => {
+                    return genres.map(([genre, entries]) => {
+                        const metrics = {
+                            valence: average(entries.map(d => parseFloat(d.valence))),
+                            acousticness: average(entries.map(d => parseFloat(d.acousticness))),
+                            danceability: average(entries.map(d => parseFloat(d.danceability))),
+                            energy: average(entries.map(d => parseFloat(d.energy))),
+                            instrumentalness: average(entries.map(d => parseFloat(d.instrumentalness))),
+                            liveness: average(entries.map(d => parseFloat(d.liveness))),
+                            speechiness: average(entries.map(d => parseFloat(d.speechiness))),
+                            tempo: average(entries.map(d => parseFloat(d.tempo))),
+                        };
+
+                        return {
+                            year,
+                            genre,
+                            ...metrics
+                        };
+                    });
+                });
+
+                // Flatten the array of arrays
+                return averagedData.flat(2);
+            }
+
+            const averagedData = groupAndAverage(unpackedData);
+
+            const margin = { top: 50, right: 300, bottom: 50, left: 80 };
+            const width = 1300 - margin.left - margin.right;
+            const height = 600 - margin.top - margin.bottom;
+            const svg = d3.select('#chart').append('svg').attr('width', width + margin.left + margin.right)
+                .attr('height', height + margin.top + margin.bottom);
+            const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+            var selectedMetric = 'valence';
+
+            const x = d3.scaleLinear()
+                .range([0, width])
+                .domain(d3.extent(averagedData, d => d.year));
+
+            const y = d3.scaleLinear()
+                .range([height, 0]).nice();
+
+            const xAxis = d3.axisBottom(x).tickFormat(d3.format('d'));
+            const yAxis = d3.axisLeft(y);
+
+            g.append('g')
+                .attr('class', 'x axis')
+                .attr('transform', `translate(0,${height})`)
+                .call(xAxis);
+
+            g.append('g')
+                .attr('class', 'y axis')
+                .call(yAxis);
+
+            var line = d3.line()
+                .curve(d3.curveBasis)
+                .x(d => x(d.year))
+                .y(d => y(+d.valence));
+
+            const metric = 'valence'; // Default metric
+            var dataByGenre = d3.groups(averagedData, d => d.genre);
+            // Update the y-scale domain based on the metric
+            y.domain([
+                d3.min(dataByGenre, d => d3.min(d[1], c => c[metric])),
+                d3.max(dataByGenre, d => d3.max(d[1], c => c[metric]))
+            ]);
+            dataByGenre = dataByGenre.filter(d => {
+                return d[1].length >= 80
+            })
+            const genresList = Array.from(new Set(dataByGenre.map(d => d[0])));
+            var selectedGenres = {};
+            const z = d3.scaleOrdinal().range([
+                "#FF6633", "#FFB399", "#FF33FF", "#FFFF99", "#00B3E6",
+                "#E6B333", "#3366E6", "#999966", "#99FF99", "#B34D4D",
+                "#80B300", "#809900", "#E6B3B3", "#6680B3", "#66991A",
+                "#FF99E6", "#CCFF1A", "#FF1A66", "#E6331A", "#33FFCC"
+            ]).domain(genresList)
+
+            // Define the legend group and position it in the right margin
+            const legend = svg.append('g')
+                .attr('class', 'legend')
+                .attr('transform', `translate(${width + margin.left + 100},${margin.top})`);
+            var legendItem;
+            genresList.unshift('Select All'); // Add 'Select All' at the beginning of the array
+
+            // Bind genresList to the legend items
+            const legendItems = legend.selectAll('.legend-item')
+                .data(genresList)
+                .enter()
+                .append('g')
+                .attr('class', 'legend-item')
+                .attr('transform', (d, i) => `translate(0, ${i * 20})`)
+                .on('click', function (event, genre) {
+                    if (genre === 'Select All') {
+                        // If 'Select All' is clicked, set all genres to selected
+                        for (const genreKey in selectedGenres) {
+                            selectedGenres[genreKey] = true;
+                            d3.selectAll('line').style('stroke-width', '1px')
+                        }
+                    } else {
+                        // Toggle the selected state for the clicked genre
+                        selectedGenres[genre] = !selectedGenres[genre];
+                    }
+                    updateChart();
+                });
+
+            // Draw the color rectangle for each legend item
+            legendItems.append('rect')
+                .attr('width', 15)
+                .attr('height', 15)
+                .attr('fill', d => d === 'Select All' ? 'none' : z(d));
+
+            // Add the text label for each legend item
+            legendItems.append('text')
+                .attr('x', 24) // X offset from the rectangle
+                .attr('y', 9) // Y offset to align it in the middle of the rectangle
+                .attr('dy', '0.35em') // Additional offset to center the text vertically
+                .text(d => d)
+                .style('font-size', '12px')
+                .attr('text-anchor', 'start');
+
+            legend.selectAll('.legend-item')
+                .classed('selected', true);
+
+            const metricLine = d3.line()
+                .curve(d3.curveBasis)
+                .x(d => x(d.year))
+                .y(d => y(d.value));
+
+            const metrics = ['valence', 'acousticness', 'danceability', 'energy', 'instrumentalness', 'liveness', 'speechiness'];
+
+            // Chart Title
+            svg.append("text")
+                .attr("x", (width / 2))
+                .attr("y", margin.top / 2)
+                .attr("text-anchor", "middle")
+                .style("font-size", "20px")
+                .style("text-decoration", "underline")
+                .text(" Genre-wise Analysis of Metrics Over the Years");
+
+            // X Axis Title
+            svg.append("text")
+                .attr("x", (width / 2))
+                .attr("y", height + margin.top * 2)
+                .attr("text-anchor", "middle")
+                .style("font-size", "16px")
+                .text("Year");
+
+            // Y Axis Title
+            svg.append("text").attr('class', 'yTitle')
+                .attr("transform", "rotate(-90)")
+                .attr("y", 0)
+                .attr("x", 0 - (height / 2))
+                .attr("dy", "1em")
+                .attr("text-anchor", "middle")
+                .style("font-size", "16px")
+                .text(selectedMetric);
+
+            // Update the yAxis with the new scale
+            g.select('.y.axis').call(yAxis);
+
+            const genreLines = g.selectAll('.genreLine')
+                .data(dataByGenre)
+                .enter().append('g')
+                .attr('class', 'genreLine')
+                .on('click', explodeGenre);
+
+            genreLines.append('path')
+                .attr('class', 'line')
+                .attr('d', d => line(d[1]))
+                .style('stroke', (d, i) => z(d[0]))
+                .on('mouseover', function (event, d) {
+                    d3.selectAll('.line').style('stroke', '#ccc').style("opacity", 0.5);
+                    d3.select(this).classed('line-hover', true).style('stroke', z(d[0])).style("opacity", 1);
+                    d3.select("#tooltip").style("opacity", 1);
+                    d3.select("#tooltip").html(d[0])
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px");
+                })
+                .on('mousemove', function (event) {
+                    d3.select("#tooltip")
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px");
+                })
+                .on('mouseout', function () {
+                    d3.selectAll('.line').style('stroke', (d) => z(d[0])).style("opacity", 1);
+                    d3.select(this).classed('line-hover', false);
+                    d3.select("#tooltip").style("opacity", 0);
+                })
+
+            // Click event handler
+            function explodeGenre(event, d) {
+                focalGenre = d[0]
+                // Highlight the selected genre line
+                d3.select(this)
+                    .transition().duration(500)
+                    .style('opacity', 1)
+                    .style('stroke-width', '3px');
+
+                // Remove existing metric lines if any
+                g.selectAll('.metricLine').remove();
+
+                // Create new data for metric lines
+                const metricsData = metrics.map(metric => {
+                    return {
+                        metric: metric,
+                        values: d[1].map(point => {
+                            return { year: point.year, value: point[metric] };
+                        })
+                    };
+                });
+                updateYDomainForMetrics(metricsData);
+
+                // Draw metric lines
+                const metricLines = g.selectAll('.metricLine')
+                    .data(metricsData)
+                    .enter().append('g')
+                    .attr('class', 'metricLine');
+
+                metricLines.append('path')
+                    .attr('class', 'metricLines')
+                    .attr('d', d => metricLine(d.values))
+                    .style('stroke', z(focalGenre))
+                    .style('opacity', 0)
+                    .on('mouseover', function (event, d) {
+                        d3.selectAll('.metricLines').style('stroke', '#ccc').style("opacity", 0.5);
+                        d3.select(this).classed('line-hover', true).style('stroke', z(focalGenre)).style("opacity", 1);
+                        d3.select("#tooltip").style("opacity", 1);
+                        d3.select("#tooltip").html(d.metric)
+                            .style("left", (event.pageX + 10) + "px")
+                            .style("top", (event.pageY - 10) + "px");
+                    })
+                    .on('mousemove', function (event) {
+                        d3.select("#tooltip")
+                            .style("left", (event.pageX + 10) + "px")
+                            .style("top", (event.pageY - 10) + "px");
+                    })
+                    .on('mouseout', function () {
+                        d3.selectAll('.metricLines').style('stroke', (d) => z(focalGenre)).style("opacity", 1);
+                        d3.select(this).classed('line-hover', false);
+                        d3.select("#tooltip").style("opacity", 0);
+                    })
+                metricLines.append('text')
+                    .attr('class', 'line-label')
+                    .attr('x', d => x(d.values[d.values.length - 1].year))
+                    .attr('y', d => y(d.values[d.values.length - 1].value))
+                    .attr('dy', '.35em')
+                    .attr('dx', '.35em')
+                    .style('fill', z(focalGenre))
+                    .style('font-size', '10px')
+                    .style('text-anchor', 'start')
+                    .text(d => d.metric);
+
+                metricLines.select('.metricLines')
+                    .transition().duration(500)
+                    .style('opacity', 1);
+
+                line = d3.line()
+                    .curve(d3.curveBasis)
+                    .x(0)
+                    .y(-20);
+                genreLines.select('.line')
+                    .transition().duration(1000)
+                    .attr('d', d => line(d[1])).style('opacity', 0)
+
+                genresList.forEach(gen=>{selectedGenres[gen] = false;})
+                selectedGenres[d[0]] = true;
+                updateChart(); 
+
+                function updateYDomainForMetrics(metricData) {
+                    y.domain([
+                        d3.min(metricData, d => d3.min(d.values, c => c.value)),
+                        d3.max(metricData, d => d3.max(d.values, c => c.value))
+                    ]);
+
+                    g.select('.y.axis').transition().duration(500).call(yAxis);
+                }
+
+            }
+
+            function updateChart() {
+                // Update the lines based on the selected genres
+                genreLines.selectAll('.line')
+                    .style('opacity', d => selectedGenres[d[0]] ? 1 : 0.1)
+                    .style('stroke-width', d => selectedGenres[d[0]] ? '2px' : '2px');
+
+                d3.selectAll('.legend-item')
+                    .classed('selected', d => selectedGenres[d])
+                    .classed('unselected', d => !selectedGenres[d]);
+            }
+
+            // Initialize all genres as unselected
+            genresList.forEach(genre => {
+                selectedGenres[genre] = false;
+            });
+
+            d3.select('#metric-select').on('change', function () {
+                selectedMetric = this.value;
+                d3.select('.yTitle').text(selectedMetric)
+                line = d3.line()
+                    .curve(d3.curveBasis)
+                    .x(d => x(d.year))
+                    .y(d => y(+d[selectedMetric]));
+
+                // Update the y-scale domain based on the new metric
+                y.domain([
+                    d3.min(dataByGenre, d => d3.min(d[1], c => c[selectedMetric])),
+                    d3.max(dataByGenre, d => d3.max(d[1], c => c[selectedMetric]))
+                ]);
+                g.selectAll('.metricLine').remove();
+
+                // Update the yAxis with the new scale
+                g.select('.y.axis').transition().duration(1000).call(yAxis);
+
+                // Update the lines with the new data
+                genreLines.select('.line')
+                    .transition().duration(1000)
+                    .attr('d', d => line(d[1]));
+
+                genreLines.select('.line')
+                    .transition().duration(1000)
+                    .attr('d', d => line(d[1])).style('opacity', 1)
+                genreLines.selectAll('.line').on('mouseover', function (event, d) {
+                    d3.selectAll('.line').style('stroke', '#ccc').style("opacity", 0.5);
+                    d3.select(this).classed('line-hover', true).style('stroke', z(d[0])).style("opacity", 1);
+                    d3.select("#tooltip").style("opacity", 1);
+                    d3.select("#tooltip").html(d[0])
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px");
+                })
+
+            });
+
+            d3.select('#reset').on('click', function(){ 
+                line = d3.line()
+                    .curve(d3.curveBasis)
+                    .x(d => x(d.year))
+                    .y(d => y(+d[selectedMetric]));
+
+                // Update the y-scale domain based on the new metric
+                y.domain([
+                    d3.min(dataByGenre, d => d3.min(d[1], c => c[selectedMetric])),
+                    d3.max(dataByGenre, d => d3.max(d[1], c => c[selectedMetric]))
+                ]);
+                g.selectAll('.metricLine').remove();
+
+                // Update the yAxis with the new scale
+                g.select('.y.axis').transition().duration(1000).call(yAxis);
+
+                // Update the lines with the new data
+                genreLines.select('.line')
+                    .transition().duration(1000)
+                    .attr('d', d => line(d[1]));
+
+                genreLines.select('.line')
+                    .transition().duration(1000)
+                    .attr('d', d => line(d[1])).style('opacity', 1)
+                genreLines.selectAll('.line').on('mouseover', function (event, d) {
+                    d3.selectAll('.line').style('stroke', '#ccc').style("opacity", 0.5);
+                    d3.select(this).classed('line-hover', true).style('stroke', z(d[0])).style("opacity", 1);
+                    d3.select("#tooltip").style("opacity", 1);
+                    d3.select("#tooltip").html(d[0])
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px");
+                })
+                 // Initialize all genres as unselected
+            genresList.forEach(genre => {
+                selectedGenres[genre] = true;
+            });
+            updateChart()
+            })
+
+
+        })
+
+    </script>
+</body>
+
+</html>
