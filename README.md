@@ -11,6 +11,8 @@ Finally, the two visualizations are stored in the `index.html` and `interactive 
 
 Some supplementary comparison maps are stored in the `dropdown.zip` folder. The folder includes `map_by_genre.html` which displays two maps based on the genre selected from the dropdown menu, and a subfolder called `maps` that contains all the raw graphs. The `comparison_maps.ipynb` Python notebook generates these comparison maps.
 
+Additionally, `spotify_data_with_coords.csv` file is the finalized dataset with genre and geographic information, and `CSE 6242 Team #134 Poster.pdf` is our final presentation poster.
+
 ## Installation
 Install the requirements.txt file using `pip install -r requirements.txt`. It's best to use a virtual environment to contain all of the necessary packages into a separate directory.
 
