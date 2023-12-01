@@ -3,7 +3,7 @@
 ## Description
 This repository, or package of files, contains all of the work completed for the DVA Fall 2023 course project - "The Sound of Music". This project is an analysis of how the characteristics of music transformed over the years across genres and geographies.
 
-The `data_cleaning.py` script performs a series of data cleaning tasks on the original dataset of Spotify songs, such as removing unicode characters and standardizing the date information. The `Wikipedia_Genre_Merge.ipynb` Python notebook is used to call the Wikipedia API to obtain further genre information for each song in the dataset. It then merges this information to create a final dataset. 
+The `data_cleaning.py` script performs a series of data cleaning tasks on the original dataset of Spotify songs, such as removing unicode characters and standardizing the date information. The `Wikipedia_Genre_Merge.ipynb` Python notebook is used to call the Wikipedia API to obtain further genre information for each artist in the dataset. It then merges this information to create a final dataset. 
 
 The `Anomaly Detection.ipynb` Python notebook calculates anomalies across the Spotify songs to determine which genres saw the most anomalous behaviors and which artists may have been behind this.
 
